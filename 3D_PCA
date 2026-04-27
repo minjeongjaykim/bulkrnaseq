@@ -1,0 +1,46 @@
+#install.packages("plotly")
+library(plotly)
+library(dplyr)
+
+## Make sure Treatment is a factor
+pca_df.risk$Treatment <- factor(
+  pca_df.risk$Treatment,
+  levels = c("Vehicle", "RETA", "WM")
+)
+
+## Define treatment colors
+treatment_cols <- c(
+  "Vehicle" = "grey40",
+  "RETA" = "red",
+  "WM" = "blue"
+)
+
+risk_pca_3d_plot <- plot_ly(
+  data = pca_df.risk,
+  x = ~PC1,
+  y = ~PC2,
+  z = ~PC3,
+  color = ~Treatment,
+  colors = treatment_cols,
+  text = ~paste0(
+    "SampleID: ", SampleID,
+    "<br>Treatment: ", Treatment,
+    "<br>PC1: ", round(PC1, 2),
+    "<br>PC2: ", round(PC2, 2),
+    "<br>PC3: ", round(PC3, 2)
+  ),
+  hoverinfo = "text",
+  type = "scatter3d",
+  mode = "markers"
+) %>%
+  layout(
+    title = "Risk study 3D PCA",
+    scene = list(
+      xaxis = list(title = paste0("PC1: ", percentVar.manual.risk[1], "% variance")),
+      yaxis = list(title = paste0("PC2: ", percentVar.manual.risk[2], "% variance")),
+      zaxis = list(title = paste0("PC3: ", percentVar.manual.risk[3], "% variance"))
+    )
+  )
+
+risk_pca_3d_plot
+
