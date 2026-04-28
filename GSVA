@@ -1,0 +1,259 @@
+## -----------------------------------------------------------------------------
+## Step 1. Load packages
+## -----------------------------------------------------------------------------
+
+library(GSVA)
+library(msigdbr)
+library(ComplexHeatmap)
+library(circlize)
+library(dplyr)
+library(tibble)
+library(grid)
+
+## -----------------------------------------------------------------------------
+## Step 2. Prepare VST expression matrix
+## -----------------------------------------------------------------------------
+
+expr_mat <- assay(vst(dds.risk, blind = TRUE))
+
+## Map Ensembl gene ID to gene symbol
+gene_map <- data.frame(
+  geneID = rownames(expr_mat),
+  geneName = counts.df$geneName[match(rownames(expr_mat), counts.df$geneID)]
+)
+
+expr_mat_symbol <- expr_mat
+rownames(expr_mat_symbol) <- gene_map$geneName
+head(expr_mat_symbol)
+
+## Remove genes without gene symbols
+expr_mat_symbol <- expr_mat_symbol[!is.na(rownames(expr_mat_symbol)), ]
+
+## Remove empty gene symbols
+expr_mat_symbol <- expr_mat_symbol[rownames(expr_mat_symbol) != "", ]
+
+## Remove duplicated gene symbols
+expr_mat_symbol <- expr_mat_symbol[!duplicated(rownames(expr_mat_symbol)), ]
+
+## Check matrix
+dim(expr_mat_symbol) #[1] 14906    24
+expr_mat_symbol[1:5, 1:5]
+
+## -----------------------------------------------------------------------------
+## Step 3. Prepare MSigDB Hallmark gene sets
+## -----------------------------------------------------------------------------
+
+## Check available mouse-native collections
+msigdbr_collections(db_species = "MM") #MH
+
+## Mouse-native Hallmark gene sets
+msig <- msigdbr(
+  species = "Mus musculus",
+  db_species = "MM",
+  collection = "MH"
+)
+
+gene_sets <- split(msig$gene_symbol, msig$gs_name)
+
+## Check gene overlap
+intersect_genes <- intersect(
+  rownames(expr_mat_symbol),
+  unique(msig$gene_symbol)
+)
+
+length(intersect_genes) #[1] 3858
+
+# Summary
+#expr_mat_symbol: 14,906 genes
+#MSigDB mouse Hallmark overlap: 3,858 genes
+#Hallmark gene set: 50 pathways
+
+## -----------------------------------------------------------------------------
+## Step 4. Run GSVA (UPDATED for new GSVA version)
+## -----------------------------------------------------------------------------
+
+expr_mat_symbol <- as.matrix(expr_mat_symbol)
+
+gsva_param <- gsvaParam(
+  exprData = expr_mat_symbol,
+  geneSets = gene_sets,
+  kcdf = "Gaussian"
+)
+
+gsva_res <- gsva(gsva_param)
+
+dim(gsva_res) #[1] 50 24
+gsva_res[1:5, 1:5]
+
+## Save GSVA score table
+gsva_df <- as.data.frame(gsva_res) %>%
+  tibble::rownames_to_column("Pathway")
+
+save_table(gsva_df, "Risk_GSVA_Hallmark_scores")
+
+## -----------------------------------------------------------------------------
+## Step 5. Scale GSVA scores for heatmap
+## -----------------------------------------------------------------------------
+
+gsva_scaled <- t(scale(t(gsva_res)))
+
+## Remove rows with NA after scaling
+gsva_scaled <- gsva_scaled[complete.cases(gsva_scaled), ]
+
+## -----------------------------------------------------------------------------
+## Step 6. Prepare sample annotation
+## -----------------------------------------------------------------------------
+
+sampleTable.gsva <- sampleTable.risk %>%
+  as.data.frame()
+
+sampleTable.gsva <- sampleTable.gsva[
+  match(colnames(gsva_scaled), sampleTable.gsva$SampleID),
+]
+
+all(sampleTable.gsva$SampleID == colnames(gsva_scaled)) #TRUE
+
+sampleTable.gsva$Treatment <- factor(
+  sampleTable.gsva$Treatment,
+  levels = c("Vehicle", "RETA", "WM")
+)
+
+treatment_cols <- c(
+  "Vehicle" = "grey40",
+  "RETA" = "red",
+  "WM" = "blue"
+)
+
+ha <- HeatmapAnnotation(
+  Treatment = sampleTable.gsva$Treatment,
+  col = list(
+    Treatment = treatment_cols
+  )
+)
+
+## -----------------------------------------------------------------------------
+## Step 7. Draw GSVA heatmap
+## -----------------------------------------------------------------------------
+
+col_fun <- colorRamp2(
+  c(-2, 0, 2),
+  c("dodgerblue3", "white", "firebrick1")
+)
+
+gsva_hm_unsupervised <- Heatmap(
+  gsva_scaled,
+  name = "GSVA score",
+  col = col_fun,
+  
+  column_title = "Risk cohort GSVA heatmap",
+  row_title = paste0("Hallmark pathways n=", nrow(gsva_scaled)),
+  
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = grid::gpar(fontsize = 8),
+  row_names_max_width = grid::unit(9, "cm"),
+  
+  show_column_names = FALSE,
+  
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_dend = FALSE,
+  
+  clustering_distance_rows = "pearson",
+  clustering_method_rows = "complete",
+  
+  clustering_distance_columns = "pearson",
+  clustering_method_columns = "complete",
+  
+  top_annotation = ha,
+  
+  heatmap_legend_param = list(
+    title = "Scaled GSVA",
+    direction = "horizontal"
+  )
+)
+
+draw(gsva_hm_unsupervised)
+
+## =============================================================================
+## Save function for ComplexHeatmap
+## =============================================================================
+
+save_heatmap <- function(heatmap_obj, title, width = 8, height = 7){
+  
+  tiff(
+    filename = sprintf("./%s_%s.tiff", title, format(Sys.Date(), "%y%m%d")),
+    width = width,
+    height = height,
+    units = "in",
+    res = 600,
+    compression = "lzw"
+  )
+  
+  draw(
+    heatmap_obj,
+    heatmap_legend_side = "bottom",
+    annotation_legend_side = "bottom",
+    merge_legend = TRUE
+  )
+  
+  dev.off()
+}
+
+## -----------------------------------------------------------------------------
+## Step 8. Save heatmap
+## -----------------------------------------------------------------------------
+save_heatmap(
+  heatmap_obj = gsva_hm_unsupervised,
+  title = "Risk_GSVA_Hallmark_heatmap_unsupervised",
+  width = 8,
+  height = 7
+)
+
+## -----------------------------------------------------------------------------
+## Step 9. Semi-supervised GSVA heatmap
+## -----------------------------------------------------------------------------
+
+gsva_hm <- Heatmap(
+  gsva_scaled,
+  name = "GSVA score",
+  col = col_fun,
+  
+  column_title = "Risk cohort GSVA heatmap",
+  row_title = paste0("Hallmark pathways n=", nrow(gsva_scaled)),
+  
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = grid::gpar(fontsize = 8),
+  row_names_max_width = grid::unit(9, "cm"),
+  
+  show_column_names = FALSE,
+  
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_dend = FALSE,
+  
+  clustering_distance_rows = "pearson",
+  clustering_method_rows = "complete",
+  clustering_distance_columns = "pearson",
+  clustering_method_columns = "complete",
+  
+  column_split = sampleTable.gsva$Treatment,
+  
+  top_annotation = ha,
+  
+  heatmap_legend_param = list(
+    title = "Scaled GSVA",
+    direction = "horizontal"
+  )
+)
+
+draw(gsva_hm)
+
+
+save_heatmap(
+  heatmap_obj = gsva_hm,
+  title = "Risk_GSVA_Hallmark_heatmap",
+  width = 8,
+  height = 7
+)
