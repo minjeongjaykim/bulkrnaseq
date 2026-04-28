@@ -1,0 +1,240 @@
+## =============================================================================
+## 8. Immune deconvolution - Risk cohort
+## =============================================================================
+
+## -----------------------------------------------------------------------------
+## Step 1. Load packages
+## -----------------------------------------------------------------------------
+
+library(immunedeconv)
+library(dplyr)
+library(tibble)
+library(ComplexHeatmap)
+library(circlize)
+library(grid)
+
+## -----------------------------------------------------------------------------
+## Step 2. Prepare expression matrix for immune deconvolution
+## -----------------------------------------------------------------------------
+## Recommended input:
+## genes x samples matrix
+## rownames = gene symbols
+## values = TPM or normalized expression
+##
+## Here, use TPM matrix from the Risk cohort.
+
+expr_deconv <- tpm.risk
+
+## Map Ensembl gene ID to gene symbol
+gene_map_deconv <- data.frame(
+  geneID = rownames(expr_deconv),
+  geneName = counts.df$geneName[match(rownames(expr_deconv), counts.df$geneID)]
+)
+
+expr_deconv_symbol <- expr_deconv
+rownames(expr_deconv_symbol) <- gene_map_deconv$geneName
+
+## Remove invalid gene symbols
+expr_deconv_symbol <- expr_deconv_symbol[!is.na(rownames(expr_deconv_symbol)), ]
+expr_deconv_symbol <- expr_deconv_symbol[rownames(expr_deconv_symbol) != "", ]
+
+## Remove duplicated gene symbols
+expr_deconv_symbol <- expr_deconv_symbol[!duplicated(rownames(expr_deconv_symbol)), ]
+
+## Convert to matrix
+expr_deconv_symbol <- as.matrix(expr_deconv_symbol)
+
+## Check matrix
+dim(expr_deconv_symbol)
+expr_deconv_symbol[1:5, 1:5]
+
+## -----------------------------------------------------------------------------
+## Step 3. Run immune deconvolution
+## -----------------------------------------------------------------------------
+## Check available methods
+immunedeconv::deconvolution_methods()
+
+## For mouse data, start with mcp_counter.
+## Output is abundance score, not exact fraction.
+
+immune_res <- immunedeconv::deconvolute(
+  gene_expression_matrix = expr_deconv_symbol,
+  method = "mcp_counter"
+)
+
+head(immune_res)
+
+## -----------------------------------------------------------------------------
+## Step 4. Save raw immune deconvolution result
+## -----------------------------------------------------------------------------
+
+save_table(
+  immune_res,
+  "Risk_immune_deconv_mcp_counter_raw"
+)
+
+## -----------------------------------------------------------------------------
+## Step 5. Convert immune result to heatmap matrix
+## -----------------------------------------------------------------------------
+## immunedeconv output:
+## first column = cell_type
+## remaining columns = samples
+
+immune_df <- as.data.frame(immune_res)
+
+rownames(immune_df) <- immune_df$cell_type
+immune_df <- immune_df[, -1]
+
+immune_mat <- as.matrix(immune_df)
+
+## Make sure values are numeric
+immune_mat <- apply(immune_mat, 2, as.numeric)
+rownames(immune_mat) <- rownames(immune_df)
+
+## Check
+dim(immune_mat)
+immune_mat[1:5, 1:5]
+
+## -----------------------------------------------------------------------------
+## Step 6. Scale immune scores for heatmap
+## -----------------------------------------------------------------------------
+## Row-wise scaling across samples
+
+immune_scaled <- t(scale(t(immune_mat)))
+
+## Remove rows with NA after scaling
+immune_scaled <- immune_scaled[complete.cases(immune_scaled), ]
+
+## -----------------------------------------------------------------------------
+## Step 7. Prepare sample annotation
+## -----------------------------------------------------------------------------
+
+sampleTable.immune <- sampleTable.risk %>%
+  as.data.frame()
+
+sampleTable.immune <- sampleTable.immune[
+  match(colnames(immune_scaled), sampleTable.immune$SampleID),
+]
+
+all(sampleTable.immune$SampleID == colnames(immune_scaled))
+
+sampleTable.immune$Treatment <- factor(
+  sampleTable.immune$Treatment,
+  levels = c("Vehicle", "RETA", "WM")
+)
+
+treatment_cols <- c(
+  "Vehicle" = "grey40",
+  "RETA" = "red",
+  "WM" = "blue"
+)
+
+ha_immune <- HeatmapAnnotation(
+  Treatment = sampleTable.immune$Treatment,
+  col = list(
+    Treatment = treatment_cols
+  )
+)
+
+## -----------------------------------------------------------------------------
+## Step 8. Heatmap color scale
+## -----------------------------------------------------------------------------
+
+immune_col_fun <- colorRamp2(
+  c(-2, 0, 2),
+  c("dodgerblue3", "white", "firebrick1")
+)
+
+## -----------------------------------------------------------------------------
+## Step 9. Unsupervised immune deconvolution heatmap
+## -----------------------------------------------------------------------------
+
+immune_hm_unsupervised <- Heatmap(
+  immune_scaled,
+  name = "Immune score",
+  col = immune_col_fun,
+  
+  column_title = "Risk cohort immune deconvolution heatmap",
+  row_title = paste0("Immune/stromal cell types n=", nrow(immune_scaled)),
+  
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = grid::gpar(fontsize = 8),
+  row_names_max_width = grid::unit(7, "cm"),
+  
+  show_column_names = FALSE,
+  
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_dend = FALSE,
+  
+  clustering_distance_rows = "pearson",
+  clustering_method_rows = "complete",
+  
+  clustering_distance_columns = "pearson",
+  clustering_method_columns = "complete",
+  
+  top_annotation = ha_immune,
+  
+  heatmap_legend_param = list(
+    title = "Scaled immune score",
+    direction = "horizontal"
+  )
+)
+
+draw(immune_hm_unsupervised)
+
+save_heatmap(
+  heatmap_obj = immune_hm_unsupervised,
+  title = "Risk_immune_deconv_mcp_counter_heatmap_unsupervised",
+  width = 8,
+  height = 6
+)
+
+## -----------------------------------------------------------------------------
+## Step 10. Semi-supervised immune deconvolution heatmap
+## -----------------------------------------------------------------------------
+
+immune_hm_semisupervised <- Heatmap(
+  immune_scaled,
+  name = "Immune score",
+  col = immune_col_fun,
+  
+  column_title = "Risk cohort immune deconvolution heatmap",
+  row_title = paste0("Immune/stromal cell types n=", nrow(immune_scaled)),
+  
+  show_row_names = TRUE,
+  row_names_side = "left",
+  row_names_gp = grid::gpar(fontsize = 8),
+  row_names_max_width = grid::unit(7, "cm"),
+  
+  show_column_names = FALSE,
+  
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_dend = FALSE,
+  
+  clustering_distance_rows = "pearson",
+  clustering_method_rows = "complete",
+  
+  clustering_distance_columns = "pearson",
+  clustering_method_columns = "complete",
+  
+  column_split = sampleTable.immune$Treatment,
+  
+  top_annotation = ha_immune,
+  
+  heatmap_legend_param = list(
+    title = "Scaled immune score",
+    direction = "horizontal"
+  )
+)
+
+draw(immune_hm_semisupervised)
+
+save_heatmap(
+  heatmap_obj = immune_hm_semisupervised,
+  title = "Risk_immune_deconv_mcp_counter_heatmap_semisupervised",
+  width = 8,
+  height = 6
+)
