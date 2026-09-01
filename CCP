@@ -1,0 +1,15 @@
+Concensus Cluster Plus ([PMID: 20427518](https://pubmed.ncbi.nlm.nih.gov/20427518/))
+
+A. To answer two questions: 
+    1. How many groups are present in a dataset. 
+    2. What is the confidence in the number of groups and the group memberships. 
+    
+B. Algorithm
+    1. Extended CC algorithm. 
+    2. Subsampling a proportation of items and a proportion of features from a data matrix. 
+    3. Each subsample is then partitioned into up to _k_ groups by a user-specified clustering algorithm: agglomerative hierarchical clustering, _k_-means or a custom algorithm. 
+    4. This process is repeated for a specified number of repetitions. 
+    5. Pairwise consensus values are calculated and stored in a _consensus_ matrix (CM) for each k. 
+    6. Then for each k, a final agglomerative hierarchical consensus clustering using the distance of 1-_consensus_ values is completed and prunded to k groups, which are called consensus clusters. 
+    7. New features of CCP algorithms are the 2D feature and item subsampling. 
+    8. The 2D subsampling provides assessments of clusters' sensitivity to both item and feature sampling variability. 
